@@ -13,6 +13,7 @@ using System.Runtime.InteropServices;
 using System.Diagnostics.Contracts;
 using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
+using System.Security.Cryptography.X509Certificates;
 
 namespace System.Security.Cryptography {
 
@@ -37,6 +38,35 @@ namespace System.Security.Cryptography {
         /// </summary>
         Pss = 8                         // BCRYPT_PAD_PSS
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct BCRYPT_DSA_KEY_BLOB_V2
+    {
+        public BCryptNative.KeyBlobMagicNumber dwMagic;  // BCRYPT_DSA_PUBLIC_MAGIC_V2 or BCRYPT_DSA_PRIVATE_MAGIC_V2
+        public int cbKey;               // key lengths in BYTES (e.g. for a 3072-bit key, cbKey = 3072/8 = 384)
+        public HASHALGORITHM_ENUM hashAlgorithm;
+        public DSAFIPSVERSION_ENUM standardVersion;
+        public int cbSeedLength;        // size (in bytes) of the seed value
+        public int cbGroupSize;         // size (in bytes) of the Q value
+        public byte Count3;             // # of iterations used to generate Q. In big-endian format.
+        public byte Count2;
+        public byte Count1;
+        public byte Count0;
+    }
+
+    internal enum HASHALGORITHM_ENUM : int
+    {
+        DSA_HASH_ALGORITHM_SHA1 = 0,
+        DSA_HASH_ALGORITHM_SHA256 = 1,
+        DSA_HASH_ALGORITHM_SHA512 = 2,
+    }
+
+    internal enum DSAFIPSVERSION_ENUM : int
+    {
+        DSA_FIPS186_2 = 0,
+        DSA_FIPS186_3 = 1,
+    }
+
     /// <summary>
     ///     Native interop with CNG's BCrypt layer. Native definitions can be found in bcrypt.h
     /// </summary>
@@ -101,6 +131,10 @@ namespace System.Security.Cryptography {
         ///     Magic numbers identifying blob types
         /// </summary>
         internal enum KeyBlobMagicNumber {
+            DsaPublic = 0x42505344,                             // BCRYPT_DSA_PUBLIC_MAGIC for key lengths <= 1024 bits
+            DsaPublicV2 = 0x32425044,                           // BCRYPT_DSA_PUBLIC_MAGIC_V2 for key lengths > 1024 bits
+            DsaPrivate = 0x56505344,                            // BCRYPT_DSA_PRIVATE_MAGIC for key lengths <= 1024 bits
+            DsaPrivateV2 = 0x32565044,                          // BCRYPT_DSA_PRIVATE_MAGIC_V2 for key lengths > 1024 bits
             ECDHPublicP256 = 0x314B4345,                        // BCRYPT_ECDH_PUBLIC_P256_MAGIC
             ECDHPublicP384 = 0x334B4345,                        // BCRYPT_ECDH_PUBLIC_P384_MAGIC
             ECDHPublicP521 = 0x354B4345,                        // BCRYPT_ECDH_PUBLIC_P521_MAGIC
@@ -145,6 +179,9 @@ namespace System.Security.Cryptography {
             public const string Hmac = "HMAC";                  // BCRYPT_KDF_HMAC
             public const string Tls = "TLS_PRF";                // BCRYPT_KDF_TLS_PRF
         }
+
+        internal const string BCRYPT_ECCPUBLIC_BLOB = "ECCPUBLICBLOB";
+        internal const string BCRYPT_ECCPRIVATE_BLOB = "ECCPRIVATEBLOB";
 
         /// <summary>
         ///     Well known BCrypt provider names
@@ -236,6 +273,22 @@ namespace System.Security.Cryptography {
                                                                          string pszAlgId,             // BCryptAlgorithm
                                                                          string pszImplementation,    // ProviderNames
                                                                          int dwFlags);
+
+            [DllImport("bcrypt.dll", SetLastError = true)]
+            internal static extern ErrorCode BCryptExportKey([In]SafeBCryptKeyHandle hKey,
+                                                             [In]IntPtr hExportKey,
+                                                             [In][MarshalAs(UnmanagedType.LPWStr)] string pszBlobType,
+                                                             [Out, MarshalAs(UnmanagedType.LPArray)] byte[] pbOutput,
+                                                             [In]int cbOutput,
+                                                             [In]ref int pcbResult,
+                                                             [In] int dwFlags);
+
+            [DllImport("Crypt32.dll", SetLastError = true)]
+            internal static extern int CryptImportPublicKeyInfoEx2([In] uint dwCertEncodingType,
+                                                   [In] ref X509Native.CERT_PUBLIC_KEY_INFO pInfo,
+                                                   [In] int dwFlags,
+                                                   [In] IntPtr pvAuxInfo,
+                                                   [Out] out SafeBCryptKeyHandle phKey);
         }
 
         //
@@ -398,6 +451,41 @@ namespace System.Security.Cryptography {
             }
 
             return algorithmHandle;
+        }
+
+        [SecuritySafeCritical]
+        internal static SafeBCryptKeyHandle ImportAsymmetricPublicKey(X509Native.CERT_PUBLIC_KEY_INFO certPublicKeyInfo, int dwFlag) {
+            SafeBCryptKeyHandle keyHandle = null;            
+            int error = UnsafeNativeMethods.CryptImportPublicKeyInfoEx2(
+                                                        X509Native.X509_ASN_ENCODING,
+                                                        ref certPublicKeyInfo,
+                                                        dwFlag,
+                                                        IntPtr.Zero,
+                                                        out keyHandle);
+            if (error == 0) {
+                throw new CryptographicException(Marshal.GetLastWin32Error());
+            }
+            return keyHandle;
+        }
+
+        [SecuritySafeCritical]
+        internal static byte[] ExportBCryptKey(SafeBCryptKeyHandle hKey, string blobType) {
+            byte[] keyBlob = null;
+            int length = 0;
+
+            ErrorCode error = UnsafeNativeMethods.BCryptExportKey(hKey, IntPtr.Zero, blobType, null, 0, ref length, 0);
+
+            if (error != ErrorCode.BufferToSmall && error != ErrorCode.Success)
+            {
+                throw new CryptographicException(Marshal.GetLastWin32Error());
+            }
+
+            keyBlob = new byte[length];
+            error = UnsafeNativeMethods.BCryptExportKey(hKey, IntPtr.Zero, blobType, keyBlob, length, ref length, 0);
+            if (error != ErrorCode.Success) {
+                throw new CryptographicException(Marshal.GetLastWin32Error());
+            }
+            return keyBlob;
         }
     }
 }

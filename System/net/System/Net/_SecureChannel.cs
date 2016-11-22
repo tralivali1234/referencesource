@@ -349,7 +349,7 @@ namespace System.Net.Security {
                 if (store != null)
                 {
                     collectionEx = store.Certificates.Find(X509FindType.FindByThumbprint, certHash, false);
-                    if (collectionEx.Count > 0 && collectionEx[0].PrivateKey != null)
+                    if (collectionEx.Count > 0 && collectionEx[0].HasPrivateKey)
                     {
                         if (Logging.On) Logging.PrintInfo(Logging.Web, this, SR.GetString(SR.net_log_found_cert_in_store, (m_ServerMode ? "LocalMachine" : "CurrentUser")));
                         return collectionEx[0];
@@ -360,7 +360,7 @@ namespace System.Net.Security {
                 if (store != null)
                 {
                     collectionEx = store.Certificates.Find(X509FindType.FindByThumbprint, certHash, false);
-                    if (collectionEx.Count > 0 && collectionEx[0].PrivateKey != null)
+                    if (collectionEx.Count > 0 && collectionEx[0].HasPrivateKey)
                     {
                         if (Logging.On) Logging.PrintInfo(Logging.Web, this, SR.GetString(SR.net_log_found_cert_in_store, (m_ServerMode ? "CurrentUser" : "LocalMachine")));
                         return collectionEx[0];
@@ -464,16 +464,17 @@ namespace System.Net.Security {
                             uint count = issuerList.cIssuers;
                             issuers = new string[issuerList.cIssuers];
                             _CERT_CHAIN_ELEMENT* pIL = (_CERT_CHAIN_ELEMENT*)issuerList.aIssuers.DangerousGetHandle();
-                            for (int i =0; i<count; ++i) {
+                            for (uint i =0; i<count; ++i) {
                                 _CERT_CHAIN_ELEMENT* pIL2 = pIL + i;
                                 uint size = pIL2->cbSize;
                                 byte* ptr = (byte*)(pIL2->pCertContext);
                                 byte[] x = new byte[size];
-                                for (int j=0; j<size; j++) {
+                                for (uint j=0; j<size; j++) {
                                     x[j] = *(ptr + j);
                                 }
                                 // Oid oid = new Oid();
                                 // oid.Value = "1.3.6.1.5.5.7.3.2";
+                                // Value of issuers[i] can be an empty string when size of x is 0.
                                 X500DistinguishedName x500DistinguishedName = new X500DistinguishedName(x);
                                 issuers[i] = x500DistinguishedName.Name;
                                 GlobalLog.Print("SecureChannel#" + ValidationHelper.HashString(this) + "::GetIssuers() IssuerListEx[" + i + "]:" + issuers[i]);
@@ -740,6 +741,12 @@ namespace System.Net.Security {
                 else
                 {
                     SecureCredential.Flags flags = SecureCredential.Flags.ValidateManual | SecureCredential.Flags.NoDefaultCred;
+
+                    if (!ServicePointManager.DisableSendAuxRecord)
+                    {
+                        flags |= SecureCredential.Flags.SendAuxRecord;
+                    }
+
                     if (!ServicePointManager.DisableStrongCrypto 
                         && ((m_ProtocolFlags & (SchProtocols.Tls10 | SchProtocols.Tls11 | SchProtocols.Tls12)) != 0)
                         && (m_EncryptionPolicy != EncryptionPolicy.AllowNoEncryption) && (m_EncryptionPolicy != EncryptionPolicy.NoEncryption))
@@ -823,7 +830,14 @@ namespace System.Net.Security {
                 }
                 else
                 {
-                    SecureCredential secureCredential = new SecureCredential(SecureCredential.CurrentVersion, selectedCert, SecureCredential.Flags.Zero, m_ProtocolFlags, m_EncryptionPolicy);
+                    SecureCredential.Flags flags = SecureCredential.Flags.Zero;
+
+                    if (!ServicePointManager.DisableSendAuxRecord)
+                    {
+                        flags |= SecureCredential.Flags.SendAuxRecord;
+                    }
+
+                    SecureCredential secureCredential = new SecureCredential(SecureCredential.CurrentVersion, selectedCert, flags, m_ProtocolFlags, m_EncryptionPolicy);
                     m_CredentialsHandle = AcquireCredentialsHandle(CredentialUse.Inbound, ref secureCredential);
                     thumbPrint = guessedThumbPrint;
                     m_ServerCertificate = localCertificate;

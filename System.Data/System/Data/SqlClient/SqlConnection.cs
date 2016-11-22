@@ -2,8 +2,8 @@
 // <copyright file="SqlConnection.cs" company="Microsoft">
 //     Copyright (c) Microsoft Corporation.  All rights reserved.
 // </copyright>
-// <owner current="true" primary="true">Microsoft</owner>
-// <owner current="true" primary="false">Microsoft</owner>
+// <owner current="true" primary="true">[....]</owner>
+// <owner current="true" primary="false">[....]</owner>
 //------------------------------------------------------------------------------
 
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("System.Data.DataSetExtensions, PublicKey="+AssemblyRef.EcmaPublicKeyFull)] // DevDiv Bugs 92166
@@ -52,7 +52,9 @@ namespace System.Data.SqlClient
         static private readonly Dictionary<string, SqlColumnEncryptionKeyStoreProvider> _SystemColumnEncryptionKeyStoreProviders
             = new Dictionary<string, SqlColumnEncryptionKeyStoreProvider>(capacity: 1, comparer: StringComparer.OrdinalIgnoreCase)
         {
-            {SqlColumnEncryptionCertificateStoreProvider.ProviderName, new SqlColumnEncryptionCertificateStoreProvider()}
+            {SqlColumnEncryptionCertificateStoreProvider.ProviderName, new SqlColumnEncryptionCertificateStoreProvider()},
+            {SqlColumnEncryptionCngProvider.ProviderName, new SqlColumnEncryptionCngProvider()},
+            {SqlColumnEncryptionCspProvider.ProviderName, new SqlColumnEncryptionCspProvider()}
         };
 
         /// <summary>
@@ -86,7 +88,51 @@ namespace System.Data.SqlClient
                 return _ColumnEncryptionTrustedMasterKeyPaths;
             }
         }
-        
+
+        /// <summary>
+        /// Defines whether query metadata caching is enabled.
+        /// </summary>
+        static private bool _ColumnEncryptionQueryMetadataCacheEnabled = true;
+
+        [
+        DefaultValue(null),
+        ResCategoryAttribute(Res.DataCategory_Data),
+        ResDescriptionAttribute(Res.TCE_SqlConnection_ColumnEncryptionQueryMetadataCacheEnabled),
+        ]
+        static public bool ColumnEncryptionQueryMetadataCacheEnabled 
+        {
+            get
+            {
+                return _ColumnEncryptionQueryMetadataCacheEnabled;
+            }
+            set
+            {
+                _ColumnEncryptionQueryMetadataCacheEnabled = value;
+            }
+        }
+
+        /// <summary>
+        /// Defines whether query metadata caching is enabled.
+        /// </summary>
+        static private TimeSpan _ColumnEncryptionKeyCacheTtl = TimeSpan.FromHours(2);
+
+        [
+        DefaultValue(null),
+        ResCategoryAttribute(Res.DataCategory_Data),
+        ResDescriptionAttribute(Res.TCE_SqlConnection_ColumnEncryptionKeyCacheTtl),
+        ]
+        static public TimeSpan ColumnEncryptionKeyCacheTtl
+        {
+            get
+            {
+                return _ColumnEncryptionKeyCacheTtl;
+            }
+            set
+            {
+                _ColumnEncryptionKeyCacheTtl = value;
+            }
+        }
+
         /// <summary>
         /// This function should only be called once in an app. This does shallow copying of the dictionary so that 
         /// the app cannot alter the custom provider list once it has been set.
@@ -234,6 +280,11 @@ namespace System.Data.SqlClient
         internal WindowsIdentity _lastIdentity;
         internal WindowsIdentity _impersonateIdentity;
         private int _reconnectCount;
+
+        // Transient Fault handling flag. This is needed to convey to the downstream mechanism of connection establishment, if Transient Fault handling should be used or not
+        // The downstream handling of Connection open is the same for idle connection resiliency. Currently we want to apply transient fault handling only to the connections opened
+        // using SqlConnection.Open() method. 
+        internal bool _applyTransientFaultHandling = false;
        
         public SqlConnection(string connectionString) : this(connectionString, null) {
         }
@@ -430,7 +481,15 @@ namespace System.Data.SqlClient
             get {
                 return ((SqlConnectionString)ConnectionOptions).TypeSystemAssemblyVersion;
             }
-        }        
+        }     
+        
+        internal PoolBlockingPeriod PoolBlockingPeriod
+        {
+            get
+            {
+                return ((SqlConnectionString)ConnectionOptions).PoolBlockingPeriod;
+            }
+        }   
 
         internal int ConnectRetryInterval {
             get {
@@ -1061,10 +1120,10 @@ namespace System.Data.SqlClient
             _accessToken = null;
 
             if (!disposing) {
-                // DevDiv2 
-
-
-
+                // DevDiv2 Bug 457934:SQLConnection leaks when not disposed
+                // http://vstfdevdiv:8080/DevDiv2/DevDiv/_workitems/edit/457934
+                // For non-pooled connections we need to make sure that if the SqlConnection was not closed, then we release the GCHandle on the stateObject to allow it to be GCed
+                // For pooled connections, we will rely on the pool reclaiming the connection
                 var innerConnection = (InnerConnection as SqlInternalConnectionTds);
                 if ((innerConnection != null) && (!innerConnection.ConnectionOptions.Pooling)) {
                     var parser = innerConnection.Parser;
@@ -1423,6 +1482,8 @@ namespace System.Data.SqlClient
 
         private bool TryOpen(TaskCompletionSource<DbConnectionInternal> retry) {
             SqlConnectionString connectionOptions = (SqlConnectionString)ConnectionOptions;
+            
+            _applyTransientFaultHandling = (retry == null && connectionOptions != null && connectionOptions.ConnectRetryCount > 0 );
 
             if (connectionOptions != null &&
                 (connectionOptions.Authentication == SqlAuthenticationMethod.SqlPassword || connectionOptions.Authentication == SqlAuthenticationMethod.ActiveDirectoryPassword) &&
@@ -1633,13 +1694,13 @@ namespace System.Data.SqlClient
         internal void OnError(SqlException exception, bool breakConnection, Action<Action> wrapCloseInAction) {
             Debug.Assert(exception != null && exception.Errors.Count != 0, "SqlConnection: OnError called with null or empty exception!");
 
-            // 
-
-
-
-
-
-
+            // Bug fix - MDAC 49022 - connection open after failure...  Problem was parser was passing
+            // Open as a state - because the parser's connection to the netlib was open.  We would
+            // then set the connection state to the parser's state - which is not correct.  The only
+            // time the connection state should change to what is passed in to this function is if
+            // the parser is broken, then we should be closed.  Changed to passing in
+            // TdsParserState, not ConnectionState.
+            // fixed by [....]
 
             if (breakConnection && (ConnectionState.Open == State)) {
 
@@ -1949,6 +2010,7 @@ namespace System.Data.SqlClient
 
                 SqlConnectionString connectionOptions = SqlConnectionFactory.FindSqlConnectionOptions(key);
                 if (connectionOptions.IntegratedSecurity || connectionOptions.Authentication == SqlAuthenticationMethod.ActiveDirectoryIntegrated) {
+
                     throw SQL.ChangePasswordConflictsWithSSPI();
                 }
                 if (! ADP.IsEmpty(connectionOptions.AttachDBFilename)) {

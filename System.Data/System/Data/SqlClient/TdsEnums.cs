@@ -2,8 +2,8 @@
 // <copyright file="TdsEnums.cs" company="Microsoft">
 //     Copyright (c) Microsoft Corporation.  All rights reserved.
 // </copyright>
-// <owner current="true" primary="true">Microsoft</owner>
-// <owner current="true" primary="false">Microsoft</owner>
+// <owner current="true" primary="true">[....]</owner>
+// <owner current="true" primary="false">[....]</owner>
 //------------------------------------------------------------------------------
 
 namespace System.Data.SqlClient {
@@ -200,6 +200,7 @@ namespace System.Data.SqlClient {
         public const byte FEATUREEXT_SRECOVERY  = 0x01;
         public const byte FEATUREEXT_FEDAUTH    = 0x02;
         public const byte FEATUREEXT_TCE        = 0x04;
+        public const byte FEATUREEXT_GLOBALTRANSACTIONS = 0x05;
 
         [Flags]
         public enum FeatureExtension:uint {
@@ -207,6 +208,7 @@ namespace System.Data.SqlClient {
             SessionRecovery=1,
             FedAuth=2,
             Tce=4,
+            GlobalTransactions = 8,
         }
 
         public const byte FEDAUTHLIB_LIVEID        = 0X00;
@@ -541,6 +543,9 @@ namespace System.Data.SqlClient {
         public const int PASSWORD_EXPIRED = 18488;
         public const int IMPERSONATION_FAILED = 1346;
         public const int P_TOKENTOOLONG = 103;
+
+        // SQL error that indicates retry for Always Encrypted
+        public const int TCE_CONVERSION_ERROR_CLIENT_RETRY = 33514;
 
         // SNI\Win32 error values
         // NOTE: these are simply windows system error codes, not SNI specific
@@ -1017,6 +1022,13 @@ namespace System.Data.SqlClient {
         ActiveDirectoryPassword,
         ActiveDirectoryIntegrated,
     }
+    // This enum indicates the state of TransparentNetworkIPResolution
+    // The first attempt when TNIR is on should be sequential. If the first attempt failes next attempts should be parallel.
+    internal enum TransparentNetworkResolutionState {
+        DisabledMode = 0,
+        SequentialMode,
+        ParallelMode
+    }; 
 
     internal class ActiveDirectoryAuthentication
     {

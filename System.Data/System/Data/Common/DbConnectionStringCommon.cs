@@ -2,8 +2,8 @@
 // <copyright file="DbConnectionStringBuilder.cs" company="Microsoft">
 //      Copyright (c) Microsoft Corporation.  All rights reserved.
 // </copyright>
-// <owner current="true" primary="true">Microsoft</owner>
-// <owner current="true" primary="false">Microsoft</owner>
+// <owner current="true" primary="true">[....]</owner>
+// <owner current="true" primary="false">[....]</owner>
 //------------------------------------------------------------------------------
 
     using System;
@@ -322,6 +322,143 @@ namespace System.Data.Common {
                 throw ADP.ConvertFailed(value.GetType(), typeof(String), e);
             }
         }
+
+        #region <<PoolBlockingPeriod Utility>>
+        const string PoolBlockingPeriodAutoString = "Auto";
+        const string PoolBlockingPeriodAlwaysBlockString = "AlwaysBlock";
+        const string PoolBlockingPeriodNeverBlockString = "NeverBlock";
+
+        internal static bool TryConvertToPoolBlockingPeriod(string value, out PoolBlockingPeriod result)
+        {
+            Debug.Assert(Enum.GetNames(typeof(PoolBlockingPeriod)).Length == 3, "PoolBlockingPeriod enum has changed, update needed");
+            Debug.Assert(null != value, "TryConvertToPoolBlockingPeriod(null,...)");
+
+            if (StringComparer.OrdinalIgnoreCase.Equals(value, PoolBlockingPeriodAutoString))
+            {
+                result = PoolBlockingPeriod.Auto;
+                return true;
+            }
+            else if (StringComparer.OrdinalIgnoreCase.Equals(value, PoolBlockingPeriodAlwaysBlockString))
+            {
+                result = PoolBlockingPeriod.AlwaysBlock;
+                return true;
+            }
+            else if (StringComparer.OrdinalIgnoreCase.Equals(value, PoolBlockingPeriodNeverBlockString))
+            {
+                result = PoolBlockingPeriod.NeverBlock;
+                return true;
+            }
+            else
+            {
+                result = DbConnectionStringDefaults.PoolBlockingPeriod;
+                return false;
+            }
+        }
+
+        internal static bool IsValidPoolBlockingPeriodValue(PoolBlockingPeriod value)
+        {
+            Debug.Assert(Enum.GetNames(typeof(PoolBlockingPeriod)).Length == 3, "PoolBlockingPeriod enum has changed, update needed");
+            return value == PoolBlockingPeriod.Auto || value == PoolBlockingPeriod.AlwaysBlock || value == PoolBlockingPeriod.NeverBlock;
+        }
+
+        internal static string PoolBlockingPeriodToString(PoolBlockingPeriod value)
+        {
+            Debug.Assert(IsValidPoolBlockingPeriodValue(value));
+            
+            if (value == PoolBlockingPeriod.AlwaysBlock)
+            {
+                return PoolBlockingPeriodAlwaysBlockString;
+            }
+            if (value == PoolBlockingPeriod.NeverBlock)
+            {
+                return PoolBlockingPeriodNeverBlockString;
+            }
+            else
+            {
+                return PoolBlockingPeriodAutoString;
+            }
+        }
+
+        /// <summary>
+        /// This method attempts to convert the given value to a PoolBlockingPeriod enum. The algorithm is:
+        /// * if the value is from type string, it will be matched against PoolBlockingPeriod enum names only, using ordinal, case-insensitive comparer
+        /// * if the value is from type PoolBlockingPeriod, it will be used as is
+        /// * if the value is from integral type (SByte, Int16, Int32, Int64, Byte, UInt16, UInt32, or UInt64), it will be converted to enum
+        /// * if the value is another enum or any other type, it will be blocked with an appropriate ArgumentException
+        /// 
+        /// in any case above, if the conerted value is out of valid range, the method raises ArgumentOutOfRangeException.
+        /// </summary>
+        /// <returns>PoolBlockingPeriod value in the valid range</returns>
+        internal static PoolBlockingPeriod ConvertToPoolBlockingPeriod(string keyword, object value)
+        {
+            Debug.Assert(null != value, "ConvertToPoolBlockingPeriod(null)");
+            string sValue = (value as string);
+            PoolBlockingPeriod result;
+            if (null != sValue)
+            {
+                // We could use Enum.TryParse<PoolBlockingPeriod> here, but it accepts value combinations like
+                // "ReadOnly, ReadWrite" which are unwelcome here
+                // Also, Enum.TryParse is 100x slower than plain StringComparer.OrdinalIgnoreCase.Equals method.
+
+                if (TryConvertToPoolBlockingPeriod(sValue, out result))
+                {
+                    return result;
+                }
+
+                // try again after remove leading & trailing whitespaces.
+                sValue = sValue.Trim();
+                if (TryConvertToPoolBlockingPeriod(sValue, out result))
+                {
+                    return result;
+                }
+
+                // string values must be valid
+                throw ADP.InvalidConnectionOptionValue(keyword);
+            }
+            else
+            {
+                // the value is not string, try other options
+                PoolBlockingPeriod eValue;
+
+                if (value is PoolBlockingPeriod)
+                {
+                    // quick path for the most common case
+                    eValue = (PoolBlockingPeriod)value;
+                }
+                else if (value.GetType().IsEnum)
+                {
+                    // explicitly block scenarios in which user tries to use wrong enum types, like:
+                    // builder["PoolBlockingPeriod"] = EnvironmentVariableTarget.Process;
+                    // workaround: explicitly cast non-PoolBlockingPeriod enums to int
+                    throw ADP.ConvertFailed(value.GetType(), typeof(PoolBlockingPeriod), null);
+                }
+                else
+                {
+                    try
+                    {
+                        // Enum.ToObject allows only integral and enum values (enums are blocked above), rasing ArgumentException for the rest
+                        eValue = (PoolBlockingPeriod)Enum.ToObject(typeof(PoolBlockingPeriod), value);
+                    }
+                    catch (ArgumentException e)
+                    {
+                        // to be consistent with the messages we send in case of wrong type usage, replace 
+                        // the error with our exception, and keep the original one as inner one for troubleshooting
+                        throw ADP.ConvertFailed(value.GetType(), typeof(PoolBlockingPeriod), e);
+                    }
+                }
+
+                // ensure value is in valid range
+                if (IsValidPoolBlockingPeriodValue(eValue))
+                {
+                    return eValue;
+                }
+                else
+                {
+                    throw ADP.InvalidEnumerationValue(typeof(ApplicationIntent), (int)eValue);
+                }
+            }
+        }
+        #endregion
 
         const string ApplicationIntentReadWriteString = "ReadWrite";
         const string ApplicationIntentReadOnlyString = "ReadOnly";
@@ -716,41 +853,43 @@ namespace System.Data.Common {
         internal const bool   OmitOracleConnectionName  = false;
 
         // SqlClient
-        internal const ApplicationIntent ApplicationIntent = System.Data.SqlClient.ApplicationIntent.ReadWrite;
-        internal const string ApplicationName            = ".Net SqlClient Data Provider";
-        internal const bool   AsynchronousProcessing     = false;
-        internal const string AttachDBFilename           = "";
-        internal const int    ConnectTimeout             = 15;
-        internal const bool   ConnectionReset            = true;
-        internal const bool   ContextConnection          = false;
-        internal const string CurrentLanguage            = "";
-        internal const string DataSource                 = "";
-        internal const bool   Encrypt                    = false;
-        internal const bool   Enlist                     = true;
-        internal const string FailoverPartner            = "";
-        internal const string InitialCatalog             = "";
-        internal const bool   IntegratedSecurity         = false;
-        internal const int    LoadBalanceTimeout         = 0; // default of 0 means don't use
-        internal const bool   MultipleActiveResultSets   = false;
-        internal const bool   MultiSubnetFailover        = false;
-        internal const int    MaxPoolSize                = 100;
-        internal const int    MinPoolSize                = 0;
-        internal const string NetworkLibrary             = "";
-        internal const int    PacketSize                 = 8000;
-        internal const string Password                   =  "";
-        internal const bool   PersistSecurityInfo        = false;
-        internal const bool   Pooling                    = true;
-        internal const bool   TrustServerCertificate     = false;
-        internal const string TypeSystemVersion          = "Latest";
-        internal const string UserID                     = "";
-        internal const bool   UserInstance               = false;
-        internal const bool   Replication                = false;
-        internal const string WorkstationID              = "";
-        internal const string TransactionBinding         = "Implicit Unbind";
-        internal const int    ConnectRetryCount          = 1;
-        internal const int    ConnectRetryInterval       = 10;
+        internal const ApplicationIntent ApplicationIntent   = System.Data.SqlClient.ApplicationIntent.ReadWrite;
+		internal const string ApplicationName                = ".Net SqlClient Data Provider";
+		internal const bool   AsynchronousProcessing         = false;
+		internal const string AttachDBFilename               = "";
+		internal const int    ConnectTimeout                 = 15;
+		internal const bool   ConnectionReset                = true;
+		internal const bool   ContextConnection              = false;
+		internal const string CurrentLanguage                = "";
+		internal const string DataSource                     = "";
+		internal const bool   Encrypt                        = false;
+		internal const bool   Enlist                         = true;
+		internal const string FailoverPartner                = "";
+		internal const string InitialCatalog                 = "";
+		internal const bool   IntegratedSecurity             = false;
+		internal const int    LoadBalanceTimeout             = 0; // default of 0 means don't use
+		internal const bool   MultipleActiveResultSets       = false;
+		internal const bool   MultiSubnetFailover            = false;
+		internal const bool   TransparentNetworkIPResolution = true;
+		internal const int    MaxPoolSize                    = 100;
+		internal const int    MinPoolSize                    = 0;
+		internal const string NetworkLibrary                 = "";
+		internal const int    PacketSize                     = 8000;
+		internal const string Password                       =  "";
+		internal const bool   PersistSecurityInfo            = false;
+		internal const bool   Pooling                        = true;
+		internal const bool   TrustServerCertificate         = false;
+		internal const string TypeSystemVersion              = "Latest";
+		internal const string UserID                         = "";
+		internal const bool   UserInstance                   = false;
+		internal const bool   Replication                    = false;
+		internal const string WorkstationID                  = "";
+		internal const string TransactionBinding             = "Implicit Unbind";
+		internal const int    ConnectRetryCount              = 1;
+		internal const int    ConnectRetryInterval           = 10;
         internal static readonly SqlAuthenticationMethod Authentication = SqlAuthenticationMethod.NotSpecified;
         internal static readonly SqlConnectionColumnEncryptionSetting ColumnEncryptionSetting = SqlConnectionColumnEncryptionSetting.Disabled;
+        internal const PoolBlockingPeriod PoolBlockingPeriod = SqlClient.PoolBlockingPeriod.Auto;
     }
 
     internal static class DbConnectionOptionKeywords {
@@ -791,31 +930,34 @@ namespace System.Data.Common {
         internal const string OmitOracleConnectionName  = "Omit Oracle Connection Name";
 
         // SqlClient
-        internal const string ApplicationIntent         = "ApplicationIntent";
-        internal const string ApplicationName           = "Application Name";
-        internal const string AsynchronousProcessing    = "Asynchronous Processing";
-        internal const string AttachDBFilename          = "AttachDbFilename";
-        internal const string ConnectTimeout            = "Connect Timeout";
-        internal const string ConnectionReset           = "Connection Reset";
-        internal const string ContextConnection         = "Context Connection";
-        internal const string CurrentLanguage           = "Current Language";
-        internal const string Encrypt                   = "Encrypt";
-        internal const string FailoverPartner           = "Failover Partner";
-        internal const string InitialCatalog            = "Initial Catalog";
-        internal const string MultipleActiveResultSets  = "MultipleActiveResultSets";
-        internal const string MultiSubnetFailover       = "MultiSubnetFailover";
-        internal const string NetworkLibrary            = "Network Library";
-        internal const string PacketSize                = "Packet Size";
-        internal const string Replication               = "Replication";
-        internal const string TransactionBinding        = "Transaction Binding";
-        internal const string TrustServerCertificate    = "TrustServerCertificate";
-        internal const string TypeSystemVersion         = "Type System Version";
-        internal const string UserInstance              = "User Instance";
-        internal const string WorkstationID             = "Workstation ID";
-        internal const string ConnectRetryCount         = "ConnectRetryCount";
-        internal const string ConnectRetryInterval      = "ConnectRetryInterval";
-        internal const string Authentication            = "Authentication";
-        internal const string ColumnEncryptionSetting   = "Column Encryption Setting";
+		internal const string ApplicationIntent              = "ApplicationIntent";
+		internal const string ApplicationName                = "Application Name";
+		internal const string AsynchronousProcessing         = "Asynchronous Processing";
+		internal const string AttachDBFilename               = "AttachDbFilename";
+		internal const string ConnectTimeout                 = "Connect Timeout";
+		internal const string ConnectionReset                = "Connection Reset";
+		internal const string ContextConnection              = "Context Connection";
+		internal const string CurrentLanguage                = "Current Language";
+		internal const string Encrypt                        = "Encrypt";
+		internal const string FailoverPartner                = "Failover Partner";
+		internal const string InitialCatalog                 = "Initial Catalog";
+		internal const string MultipleActiveResultSets       = "MultipleActiveResultSets";
+		internal const string MultiSubnetFailover            = "MultiSubnetFailover";
+		internal const string TransparentNetworkIPResolution = "TransparentNetworkIPResolution";
+		internal const string NetworkLibrary                 = "Network Library";
+		internal const string PacketSize                     = "Packet Size";
+		internal const string Replication                    = "Replication";
+		internal const string TransactionBinding             = "Transaction Binding";
+		internal const string TrustServerCertificate         = "TrustServerCertificate";
+		internal const string TypeSystemVersion              = "Type System Version";
+		internal const string UserInstance                   = "User Instance";
+		internal const string WorkstationID                  = "Workstation ID";
+		internal const string ConnectRetryCount              = "ConnectRetryCount";
+		internal const string ConnectRetryInterval           = "ConnectRetryInterval";
+		internal const string Authentication                 = "Authentication";
+		internal const string Certificate                    = "Certificate";
+		internal const string ColumnEncryptionSetting        = "Column Encryption Setting";
+        internal const string PoolBlockingPeriod             = "PoolBlockingPeriod";
         
         // common keywords (OleDb, OracleClient, SqlClient)
         internal const string DataSource                = "Data Source";

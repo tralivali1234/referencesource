@@ -3,6 +3,15 @@
 //   Copyright (c) Microsoft Corporation.  All rights reserved.
 // 
 // ==--==
+
+// There are cases where we have multiple assemblies that are going to import this file and 
+// if they are going to also have InternalsVisibleTo between them, there will be a compiler warning
+// that the type is found both in the source and in a referenced assembly. The compiler will prefer 
+// the version of the type defined in the source
+//
+// In order to disable the warning for this type we are disabling this warning for this entire file.
+#pragma warning disable 436
+
 using System;
 using System.Collections.Generic;
 
@@ -25,7 +34,6 @@ namespace System
         /// We have this separate method for getting the parsed elements out of the TargetFrameworkName so we can
         /// more easily support this on other platforms.
         /// </summary>
-        [System.Security.SecuritySafeCritical]
         private static void ParseTargetFrameworkName(out string identifier, out string profile, out int version)
         {
             string targetFrameworkMoniker = AppDomain.CurrentDomain.SetupInformation.TargetFrameworkName;
@@ -168,3 +176,5 @@ namespace System
         static partial void PopulateDefaultValuesPartial(string platformIdentifier, string profile, int version);
     }
 }
+
+#pragma warning restore 436
