@@ -1400,7 +1400,7 @@ namespace System.Web.Compilation {
             if (buildProviderType == null)
                 return null;
 
-            object o = HttpRuntime.CreatePublicInstance(buildProviderType);
+            object o = HttpRuntime.CreatePublicInstanceByWebObjectActivator(buildProviderType);
 
             BuildProvider buildProvider = (BuildProvider)o;
 
@@ -1420,7 +1420,7 @@ namespace System.Web.Compilation {
             List<Type> buildProviderTypes = CompilationUtil.GetFolderLevelBuildProviderTypes(compConfig, appliesTo);
             if (buildProviderTypes != null) {
                 foreach (Type buildProviderType in buildProviderTypes) {
-                    object o = HttpRuntime.CreatePublicInstance(buildProviderType);
+                    object o = HttpRuntime.CreatePublicInstanceByWebObjectActivator(buildProviderType);
 
                     BuildProvider buildProvider = (BuildProvider)o;
 
@@ -3057,7 +3057,8 @@ namespace System.Web.Compilation {
         internal static void ReportDirectoryCompilationProgress(VirtualPath virtualDir) {
 
             // Nothing to do if there is no CBM callback
-            if (CBMCallback == null)
+            ClientBuildManagerCallback callback = CBMCallback;
+            if (callback == null)
                 return;
 
             // Don't report anything if the directory doesn't exist
@@ -3065,7 +3066,7 @@ namespace System.Web.Compilation {
                 return;
 
             string message = SR.GetString(SR.Directory_progress, virtualDir.VirtualPathString);
-            CBMCallback.ReportProgress(message);
+            callback.ReportProgress(message);
         }
 
 

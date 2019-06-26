@@ -1,7 +1,7 @@
 // ==++==
-// 
+//
 //   Copyright (c) Microsoft Corporation.  All rights reserved.
-// 
+//
 // ==--==
 
 namespace System
@@ -18,6 +18,36 @@ namespace System
             get
             {
                 return GetCachedSwitchValue(AppContextDefaultValues.SwitchNoAsyncCurrentCulture, ref _noAsyncCurrentCulture);
+            }
+        }
+
+        private static int _enforceJapaneseEraYearRanges;
+        public static bool EnforceJapaneseEraYearRanges
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get
+            {
+                return GetCachedSwitchValue(AppContextDefaultValues.SwitchEnforceJapaneseEraYearRanges, ref _enforceJapaneseEraYearRanges);
+            }
+        }
+
+        private static int _formatJapaneseFirstYearAsANumber;
+        public static bool FormatJapaneseFirstYearAsANumber
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get
+            {
+                return GetCachedSwitchValue(AppContextDefaultValues.SwitchFormatJapaneseFirstYearAsANumber, ref _formatJapaneseFirstYearAsANumber);
+            }
+        }
+
+        private static int _enforceLegacyJapaneseDateParsing;
+        public static bool EnforceLegacyJapaneseDateParsing
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get
+            {
+                return GetCachedSwitchValue(AppContextDefaultValues.SwitchEnforceLegacyJapaneseDateParsing, ref _enforceLegacyJapaneseDateParsing);
             }
         }
 
@@ -90,6 +120,66 @@ namespace System
             get
             {
                 return GetCachedSwitchValue(AppContextDefaultValues.SwitchDoNotAddrOfCspParentWindowHandle, ref _doNotAddrOfCspParentWindowHandle);
+            }
+        }
+
+        private static int _ignorePortablePDBsInStackTraces;
+        public static bool IgnorePortablePDBsInStackTraces
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get
+            {
+                return GetCachedSwitchValue(AppContextDefaultValues.SwitchIgnorePortablePDBsInStackTraces, ref _ignorePortablePDBsInStackTraces);
+            }
+        }
+
+        private static int _useNewMaxArraySize;
+        public static bool UseNewMaxArraySize
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get
+            {
+                return GetCachedSwitchValue(AppContextDefaultValues.SwitchUseNewMaxArraySize, ref _useNewMaxArraySize);
+            }
+        }
+
+        private static int _useLegacyExecutionContextBehaviorUponUndoFailure;
+        public static bool UseLegacyExecutionContextBehaviorUponUndoFailure
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get
+            {
+                return GetCachedSwitchValue(AppContextDefaultValues.SwitchUseLegacyExecutionContextBehaviorUponUndoFailure, ref _useLegacyExecutionContextBehaviorUponUndoFailure);
+            }
+        }
+
+        private static int _useLegacyFipsThrow;
+        public static bool UseLegacyFipsThrow
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get
+            {
+                return GetCachedSwitchValue(AppContextDefaultValues.SwitchCryptographyUseLegacyFipsThrow, ref _useLegacyFipsThrow);
+            }
+        }
+
+        private static int _doNotMarshalOutByrefSafeArrayOnInvoke;
+        public static bool DoNotMarshalOutByrefSafeArrayOnInvoke
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get
+            {
+                return GetCachedSwitchValue(AppContextDefaultValues.SwitchDoNotMarshalOutByrefSafeArrayOnInvoke, ref _doNotMarshalOutByrefSafeArrayOnInvoke);
+            }
+        }
+
+        private static int _useNetCoreTimer;
+        public static bool UseNetCoreTimer
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get
+            {
+                return GetCachedSwitchValue(AppContextDefaultValues.SwitchUseNetCoreTimer, ref _useNetCoreTimer);
             }
         }
 

@@ -755,6 +755,10 @@ namespace System.Net {
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Microsoft.Design", 
+        "CA1031:DoNotCatchGeneralExceptionTypes", 
+        Justification = "We need to ensure that this class initializes in any condition.")]
 #if !FEATURE_PAL
     [SuppressUnmanagedCodeSecurity]
 #if DEBUG
@@ -763,8 +767,27 @@ namespace System.Net {
     internal sealed class SafeLoadLibrary : SafeHandleZeroOrMinusOneIsInvalid {
 #endif
         private const string KERNEL32 = "kernel32.dll";
+        private const string AddDllDirectory = "AddDllDirectory";
+        private const uint LOAD_LIBRARY_SEARCH_SYSTEM32 = 0x00000800;
 
         public static readonly SafeLoadLibrary Zero = new SafeLoadLibrary(false);
+
+        // KB2533623 introduced the LOAD_LIBRARY_SEARCH_SYSTEM32 flag. It also introduced
+        // the AddDllDirectory function. We test for presence of AddDllDirectory as  
+        // indirect evidence of support for the LOAD_LIBRARY_SEARCH_SYSTEM32 flag. 
+        private static uint _flags = 0;
+
+        static SafeLoadLibrary() {
+            try {
+                IntPtr hKernel32 = UnsafeNclNativeMethods.SafeNetHandles.GetModuleHandleW(KERNEL32);
+
+                if (hKernel32 != IntPtr.Zero &&
+                    UnsafeNclNativeMethods.GetProcAddress(hKernel32, AddDllDirectory) != IntPtr.Zero) {
+                    _flags = LOAD_LIBRARY_SEARCH_SYSTEM32;
+                }
+            }
+            catch { /* noop to ensure this class can initialize */ }
+        }
 
         private SafeLoadLibrary() : base(true) {
         }
@@ -774,7 +797,7 @@ namespace System.Net {
 
         public unsafe static SafeLoadLibrary LoadLibraryEx(string library) {
 
-            SafeLoadLibrary result = UnsafeNclNativeMethods.SafeNetHandles.LoadLibraryExW(library, null, 0);
+            SafeLoadLibrary result = UnsafeNclNativeMethods.SafeNetHandles.LoadLibraryExW(library, null, _flags);
             if (result.IsInvalid) {
                 result.SetHandleAsInvalid();
             }
@@ -790,7 +813,6 @@ namespace System.Net {
         protected override bool ReleaseHandle() {
             return UnsafeNclNativeMethods.SafeNetHandles.FreeLibrary(handle);
         }
-
     }
 
     ///////////////////////////////////////////////////////////////
@@ -1472,9 +1494,9 @@ namespace System.Net {
 
             int errorCode = -1;
 
-            SSPIHandle contextHandle = new SSPIHandle();
+            bool isContextAbsent = true;
             if (refContext != null)
-                contextHandle = refContext._handle;
+                isContextAbsent = refContext._handle.IsZero;
 
             // these are pinned user byte arrays passed along with SecurityBuffers
             GCHandle[] pinnedInBytes = null;
@@ -1544,7 +1566,16 @@ namespace System.Net {
                         {
                         case SecurDll.SECURITY:
                                     if (refContext == null || refContext.IsInvalid)
-                                        refContext = new SafeDeleteContext_SECURITY();
+                                    {
+                                        // Previous versions unconditionally built a new "refContext" here, but would pass
+                                        // incorrect arguments to InitializeSecurityContextW in cases where an "contextHandle" was
+                                        // already present and non-zero (e.g., because the "refContext" had been closed due to an abort on
+                                        // another thread). In these cases, allow the "refContext" to flow through unmodified
+                                        // (which will generate an ObjectDisposedException during the callout below). In all other
+                                        // cases, continue to build a new "refContext" in an attempt to maximize compat.
+                                        if (isContextAbsent)
+                                            refContext = new SafeDeleteContext_SECURITY();
+                                    }
 
                                     if (targetName == null || targetName.Length == 0)
                                         targetName = dummyStr;
@@ -1553,7 +1584,7 @@ namespace System.Net {
                                     {
                                         errorCode = MustRunInitializeSecurityContext_SECURITY(
                                                         ref inCredentials,
-                                                        contextHandle.IsZero? null: &contextHandle,
+                                                        isContextAbsent,
                                                         (byte*)(((object)targetName == (object) dummyStr)? null: namePtr),
                                                         inFlags,
                                                         endianness,
@@ -1614,7 +1645,7 @@ namespace System.Net {
         //
         private static unsafe int MustRunInitializeSecurityContext_SECURITY(
                                                   ref SafeFreeCredentials inCredentials,
-                                                  void*            inContextPtr,
+                                                  bool             isContextAbsent,
                                                   byte*            targetName,
                                                   ContextFlags     inFlags,
                                                   Endianness       endianness,
@@ -1663,6 +1694,18 @@ namespace System.Net {
                 }
                 else if (b1 && b2)
                 {
+                    // Now that "outContext" (or "refContext" by the caller) references an actual handle (and cannot 
+                    // be closed until it is released below), point "inContextPtr" to its embedded handle (or
+                    // null if the embedded handle has not yet been initialized).
+                    SSPIHandle contextHandle = outContext._handle;
+                    void* inContextPtr = contextHandle.IsZero ? null : &contextHandle;
+
+                    // The "isContextAbsent" supplied by the caller is generally correct but was computed
+                    // without proper synchronization (and is only supplied to maximize compat with previous
+                    // releases in error cases that never reach the InitializeSecurityContextW call below).
+                    // Rewrite the indicator now that the final "inContext" is known, update if necessary.
+                    isContextAbsent = (inContextPtr == null);
+
                     errorCode = UnsafeNclNativeMethods.SafeNetHandles_SECURITY.InitializeSecurityContextW(
                                 ref credentialHandle,
                                 inContextPtr,
@@ -1706,7 +1749,7 @@ namespace System.Net {
                 }
 
 
-                if (inContextPtr == null && (errorCode & 0x80000000) != 0)
+                if (isContextAbsent && (errorCode & 0x80000000) != 0)
                 {
                     // an error on the first call, need to set the out handle to invalid value
                     outContext._handle.SetToInvalid();
@@ -1776,9 +1819,9 @@ namespace System.Net {
 
             int errorCode = -1;
 
-            SSPIHandle contextHandle = new SSPIHandle();
+            bool isContextAbsent = true;
             if (refContext != null)
-                contextHandle = refContext._handle;
+                isContextAbsent = refContext._handle.IsZero;
 
             // these are pinned user byte arrays passed along with SecurityBuffers
             GCHandle[] pinnedInBytes = null;
@@ -1847,11 +1890,20 @@ namespace System.Net {
                         {
                         case SecurDll.SECURITY:
                                     if (refContext == null || refContext.IsInvalid)
-                                        refContext = new SafeDeleteContext_SECURITY();
+                                    {
+                                        // Previous versions unconditionally built a new "refContext" here, but would pass
+                                        // incorrect arguments to InitializeSecurityContextW in cases where an "contextHandle" was
+                                        // already present and non-zero (e.g., because the "refContext" had been closed due to an abort on
+                                        // another thread). In these cases, allow the "refContext" to flow through unmodified
+                                        // (which will generate an ObjectDisposedException during the callout below). In all other
+                                        // cases, continue to build a new "refContext" in an attempt to maximize compat.
+                                        if (isContextAbsent)
+                                            refContext = new SafeDeleteContext_SECURITY();
+                                    }
 
                                     errorCode = MustRunAcceptSecurityContext_SECURITY(
                                                     ref inCredentials,
-                                                    contextHandle.IsZero? null: &contextHandle,
+                                                    isContextAbsent,
                                                     inSecurityBufferDescriptor,
                                                     inFlags,
                                                     endianness,
@@ -1912,7 +1964,7 @@ namespace System.Net {
         //
         private static unsafe int MustRunAcceptSecurityContext_SECURITY(
                                                   ref SafeFreeCredentials     inCredentials,
-                                                  void*            inContextPtr,
+                                                  bool               isContextAbsent,
                                                   SecurityBufferDescriptor inputBuffer,
                                                   ContextFlags     inFlags,
                                                   Endianness       endianness,
@@ -1958,6 +2010,18 @@ namespace System.Net {
                 }
                 else if (b1 && b2)
                 {
+                    // Now that "outContext" (or "refContext" by the caller) references an actual handle (and cannot 
+                    // be closed until it is released below), point "inContextPtr" to its embedded handle (or
+                    // null if the embedded handle has not yet been initialized).
+                    SSPIHandle contextHandle = outContext._handle;
+                    void* inContextPtr = contextHandle.IsZero ? null : &contextHandle;
+
+                    // The "isContextAbsent" supplied by the caller is generally correct but was computed
+                    // without proper synchronization (and is only supplied to maximize compat with previous
+                    // releases in error cases that never reach the InitializeSecurityContextW call below).
+                    // Rewrite the indicator now that the final "inContext" is known, update if necessary.
+                    isContextAbsent = (inContextPtr == null);
+
                     errorCode = UnsafeNclNativeMethods.SafeNetHandles_SECURITY.AcceptSecurityContext(
                                 ref credentialHandle,
                                 inContextPtr,
@@ -1999,7 +2063,7 @@ namespace System.Net {
                     }
                 }
 
-                if (inContextPtr == null && (errorCode & 0x80000000) != 0)
+                if (isContextAbsent && (errorCode & 0x80000000) != 0)
                 {
                     // an error on the first call, need to set the out handle to invalid value
                     outContext._handle.SetToInvalid();
@@ -2070,7 +2134,14 @@ namespace System.Net {
                 try {
                     if (dll==SecurDll.SECURITY) {
                         if (refContext == null || refContext.IsInvalid) {
-                            refContext = new SafeDeleteContext_SECURITY();
+                            // Previous versions unconditionally built a new "refContext" here, but would pass
+                            // incorrect arguments to CompleteAuthToken in cases where a nonzero "contextHandle" was
+                            // already present (e.g., because the "refContext" had been closed due to an abort on
+                            // another thread). In these cases, allow the "refContext" to flow through unmodified
+                            // (which will generate an ObjectDisposedException below). In all other cases, continue to
+                            // build a new "refContext" in an attempt to maximize compat.
+                            if (contextHandle.IsZero)
+                                refContext = new SafeDeleteContext_SECURITY();
                         }
 
                         bool b = false;
@@ -2183,7 +2254,14 @@ namespace System.Net {
                     {
                         if (refContext == null || refContext.IsInvalid)
                         {
-                            refContext = new SafeDeleteContext_SECURITY();
+                            // Previous versions unconditionally built a new "refContext" here, but would pass
+                            // incorrect arguments to ApplyControlToken in cases where a nonzero "contextHandle" was
+                            // already present (e.g., because the "refContext" had been closed due to an abort on
+                            // another thread). In these cases, allow the "refContext" to flow through unmodified
+                            // (which will generate an ObjectDisposedException below). In all other cases, continue to
+                            // build a new "refContext" in an attempt to maximize compat.
+                            if (contextHandle.IsZero)
+                                refContext = new SafeDeleteContext_SECURITY();
                         }
 
                         bool b = false;
